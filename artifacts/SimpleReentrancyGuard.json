@@ -1,0 +1,73 @@
+{
+	"deploy": {
+		"VM:-": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"main:1": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"ropsten:3": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"rinkeby:4": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"kovan:42": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"goerli:5": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		},
+		"Custom": {
+			"linkReferences": {},
+			"autoDeployLib": true
+		}
+	},
+	"data": {
+		"bytecode": {
+			"functionDebugData": {
+				"@_273": {
+					"entryPoint": null,
+					"id": 273,
+					"parameterSlots": 0,
+					"returnSlots": 0
+				}
+			},
+			"generatedSources": [],
+			"linkReferences": {},
+			"object": "6080604052348015600e575f5ffd5b5060015f81905550603e8060215f395ff3fe60806040525f5ffdfea2646970667358221220ba3ab24d5499200d620331dc95309a422361488793a1a19d7480903f7b0adfb064736f6c634300081e0033",
+			"opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH1 0xE JUMPI PUSH0 PUSH0 REVERT JUMPDEST POP PUSH1 0x1 PUSH0 DUP2 SWAP1 SSTORE POP PUSH1 0x3E DUP1 PUSH1 0x21 PUSH0 CODECOPY PUSH0 RETURN INVALID PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 PUSH0 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 0xBA GASPRICE 0xB2 0x4D SLOAD SWAP10 KECCAK256 0xD PUSH3 0x331DC SWAP6 ADDRESS SWAP11 TIMESTAMP 0x23 PUSH2 0x4887 SWAP4 LOG1 LOG1 SWAP14 PUSH21 0x80903F7B0ADFB064736F6C634300081E0033000000 ",
+			"sourceMap": "3138:264:0:-:0;;;3204:30;;;;;;;;;;3230:1;3220:7;:11;;;;3138:264;;;;;;"
+		},
+		"deployedBytecode": {
+			"functionDebugData": {},
+			"generatedSources": [],
+			"immutableReferences": {},
+			"linkReferences": {},
+			"object": "60806040525f5ffdfea2646970667358221220ba3ab24d5499200d620331dc95309a422361488793a1a19d7480903f7b0adfb064736f6c634300081e0033",
+			"opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE PUSH0 PUSH0 REVERT INVALID LOG2 PUSH5 0x6970667358 0x22 SLT KECCAK256 0xBA GASPRICE 0xB2 0x4D SLOAD SWAP10 KECCAK256 0xD PUSH3 0x331DC SWAP6 ADDRESS SWAP11 TIMESTAMP 0x23 PUSH2 0x4887 SWAP4 LOG1 LOG1 SWAP14 PUSH21 0x80903F7B0ADFB064736F6C634300081E0033000000 ",
+			"sourceMap": "3138:264:0:-:0;;;;;"
+		},
+		"gasEstimates": {
+			"creation": {
+				"codeDepositCost": "12400",
+				"executionCost": "22177",
+				"totalCost": "34577"
+			}
+		},
+		"methodIdentifiers": {}
+	},
+	"abi": [
+		{
+			"inputs": [],
+			"stateMutability": "nonpayable",
+			"type": "constructor"
+		}
+	]
+}
