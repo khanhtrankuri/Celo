@@ -2,19 +2,20 @@
 pragma solidity ^0.8.0;
 
 /*
- RemittanceEscrowSecret.sol
+ RemittanceEscrowSecret.sol (reinforced)
 
- - Tính năng chính:
+ - Tính năng:
    * Escrow theo lô (id tự tăng)
-   * Người gửi nạp (deposit) stablecoin (ví dụ cUSD/USDC trên Celo)
-   * Người nhận rút bằng cách cung cấp secret hợp lệ trước deadline
-   * Quá hạn => chỉ người gửi được refund
-   * Phí linh hoạt feeBps (0..10000), thu khi claim thành công
+   * Sender deposit stablecoin (cUSD/USDC)
+   * Recipient claim bằng secret trước deadline
+   * Hết hạn -> chỉ Sender được refund
+   * Phí linh hoạt feeBps (0..10000), thu khi claim
    * SafeERC20 tối giản + chống reentrancy
-   * Hỗ trợ fee-on-transfer (ghi nhận amountExpected/amountReceived qua chênh lệch balance)
- - Lưu ý bảo mật:
-   * secretHash = keccak256(abi.encodePacked(secret, recipient)) (khuyến nghị) tính OFF-CHAIN
-   * Contract KHÔNG có hàm ownerWithdraw ERC20 để tránh rủi ro "rug"
+   * Ghi nhận amountExpected/amountReceived (hỗ trợ fee-on-transfer)
+ - Bổ sung:
+   * deposit() thêm nonReentrant
+   * Kiểm tra token là contract (EXTCODESIZE > 0)
+   * Helper: paymentExists, computeSecretHashFromString, previewPayout
 */
 
 interface IERC20 {
@@ -108,8 +109,8 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
         uint256 amountReceived; // số lượng thực đã vào escrow (hỗ trợ fee-on-transfer)
         address recipient;      // người nhận
         uint256 createdAt;      // thời điểm nạp
-        uint256 deadline;       // hạn cuối để người nhận claim bằng secret
-        bytes32 secretHash;     // keccak256(abi.encodePacked(secret, recipient)) (khuyến nghị)
+        uint256 deadline;       // hạn cuối claim
+        bytes32 secretHash;     // keccak256(abi.encodePacked(secret, recipient))
         bool claimed;           // đã claim thành công?
         bool refunded;          // đã refund cho sender?
     }
@@ -141,7 +142,6 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
     );
 
     event FeeChanged(uint256 oldFeeBps, uint256 newFeeBps);
-
     event OwnerWithdrawNative(uint256 amount);
 
     constructor(uint256 _feeBps) {
@@ -150,13 +150,43 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
         nextId = 1;
     }
 
+    // ========= Helpers (tiện debug/kiểm tra trước khi gọi) =========
+
+    function paymentExists(uint256 id) external view returns (bool) {
+        return payments[id].amountReceived > 0;
+    }
+
+    function computeSecretHashFromString(string calldata secret, address recipient)
+        external pure returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(bytes(secret), recipient));
+    }
+
+    function previewPayout(uint256 id) external view returns (uint256 payout, uint256 fee) {
+        Payment storage p = payments[id];
+        require(p.amountReceived > 0, "not found");
+        uint256 _fee = feeBps > 0 ? (p.amountReceived * feeBps) / 10000 : 0;
+        uint256 _payout = p.amountReceived - _fee;
+        return (_payout, _fee);
+    }
+
+    // ========= Internal utils =========
+
+    function _isContract(address a) internal view returns (bool) {
+        uint256 size;
+        assembly { size := extcodesize(a) }
+        return size > 0;
+    }
+
+    // ========= Core functions =========
+
     /**
      * @notice Nạp tiền vào escrow.
      * @param token địa chỉ ERC20 stablecoin (ví dụ cUSD)
      * @param amountExpected số lượng dự định chuyểnFrom
      * @param recipient người nhận
      * @param deadline hạn cuối claim (>= block.timestamp + 60)
-     * @param secretHash hash bí mật: khuyến nghị = keccak256(abi.encodePacked(secret, recipient))
+     * @param secretHash hash bí mật = keccak256(abi.encodePacked(secret, recipient))
      * @return id mã thanh toán
      */
     function deposit(
@@ -165,8 +195,9 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
         address recipient,
         uint256 deadline,
         bytes32 secretHash
-    ) external returns (uint256 id) {
+    ) external nonReentrant returns (uint256 id) {
         require(token != address(0), "token zero");
+        require(_isContract(token), "token not contract");
         require(amountExpected > 0, "amount>0");
         require(recipient != address(0), "recipient zero");
         require(secretHash != bytes32(0), "secretHash zero");
@@ -207,7 +238,7 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
     /**
      * @notice Người nhận rút tiền bằng secret trước deadline.
      * @param id mã thanh toán
-     * @param secret bytes bất kỳ; hợp lệ khi keccak256(abi.encodePacked(secret, recipient)) == secretHash
+     * @param secret chuỗi bí mật; hợp lệ khi keccak256(abi.encodePacked(bytes(secret), recipient)) == secretHash
      */
     function claim(uint256 id, string calldata secret) external nonReentrant {
         Payment storage p = payments[id];
@@ -223,7 +254,11 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
 
         p.claimed = true;
 
-        uint256 fee = (p.amountReceived * feeBps) / 10000;
+        uint256 fee = 0;
+        if (feeBps > 0) {
+            require(p.amountReceived <= type(uint256).max / feeBps, "fee overflow");
+            fee = (p.amountReceived * feeBps) / 10000;
+        }
         uint256 payout = p.amountReceived - fee;
 
         SafeERC20.safeTransfer(p.token, p.recipient, payout);
@@ -231,8 +266,6 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
 
         emit Claimed(id, p.recipient, payout, fee);
     }
-
-
 
     /**
      * @notice Quá hạn, người gửi được refund.
@@ -272,7 +305,7 @@ contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
     receive() external payable {}
     fallback() external payable {}
 
-    // Helper
+    // Helper view
     function getPayment(uint256 id) external view returns (Payment memory) {
         return payments[id];
     }
