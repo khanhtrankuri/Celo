@@ -2,16 +2,19 @@
 pragma solidity ^0.8.0;
 
 /*
-  SimpleEscrowAutoReleaseStandalone.sol
+ RemittanceEscrowSecret.sol
 
-  - Self-contained (no external OpenZeppelin imports) for easy Remix + Injected Provider (MetaMask) use.
-  - Features:
-    * Simple Ownable
-    * ReentrancyGuard (nonReentrant)
-    * SafeERC20 minimal (safeTransfer/safeTransferFrom using low-level call and return-data checks)
-    * Records amountExpected and amountReceived (supports fee-on-transfer tokens)
-    * unlockTimestamp per deposit, anyone can release after unlockTimestamp
-    * Fee in basis points (feeBps). Owner receives fee on release.
+ - Tính năng chính:
+   * Escrow theo lô (id tự tăng)
+   * Người gửi nạp (deposit) stablecoin (ví dụ cUSD/USDC trên Celo)
+   * Người nhận rút bằng cách cung cấp secret hợp lệ trước deadline
+   * Quá hạn => chỉ người gửi được refund
+   * Phí linh hoạt feeBps (0..10000), thu khi claim thành công
+   * SafeERC20 tối giản + chống reentrancy
+   * Hỗ trợ fee-on-transfer (ghi nhận amountExpected/amountReceived qua chênh lệch balance)
+ - Lưu ý bảo mật:
+   * secretHash = keccak256(abi.encodePacked(secret, recipient)) (khuyến nghị) tính OFF-CHAIN
+   * Contract KHÔNG có hàm ownerWithdraw ERC20 để tránh rủi ro "rug"
 */
 
 interface IERC20 {
@@ -30,9 +33,7 @@ library SafeERC20 {
     function _callOptionalReturn(address token, bytes memory data) private {
         (bool success, bytes memory returndata) = token.call(data);
         require(success, "ERC20: low-level call failed");
-
-        if (returndata.length > 0) { // Return data is optional
-            // Tokens that return a bool will return 32 bytes; decode and require true
+        if (returndata.length > 0) {
             require(abi.decode(returndata, (bool)), "ERC20: operation did not succeed");
         }
     }
@@ -94,21 +95,23 @@ contract SimpleReentrancyGuard {
     }
 }
 
-contract SimpleEscrowAutoRelease is SimpleOwnable, SimpleReentrancyGuard {
-    using SafeERC20 for address; // call SafeERC20 functions via address type
+contract RemittanceEscrowSecret is SimpleOwnable, SimpleReentrancyGuard {
+    using SafeERC20 for address; // gọi SafeERC20 qua kiểu address
 
     uint256 public feeBps; // 0..10000
     uint256 public nextId;
 
     struct Payment {
-        address sender;
-        address token;
-        uint256 amountExpected;
-        uint256 amountReceived;
-        address recipient;
-        uint256 createdAt;
-        uint256 unlockTimestamp;
-        bool released;
+        address sender;         // người gửi (depositor)
+        address token;          // ERC20 stablecoin (cUSD/USDC...)
+        uint256 amountExpected; // số lượng mong muốn chuyểnFrom
+        uint256 amountReceived; // số lượng thực đã vào escrow (hỗ trợ fee-on-transfer)
+        address recipient;      // người nhận
+        uint256 createdAt;      // thời điểm nạp
+        uint256 deadline;       // hạn cuối để người nhận claim bằng secret
+        bytes32 secretHash;     // keccak256(abi.encodePacked(secret, recipient)) (khuyến nghị)
+        bool claimed;           // đã claim thành công?
+        bool refunded;          // đã refund cho sender?
     }
 
     mapping(uint256 => Payment) public payments;
@@ -120,12 +123,25 @@ contract SimpleEscrowAutoRelease is SimpleOwnable, SimpleReentrancyGuard {
         uint256 amountExpected,
         uint256 amountReceived,
         address indexed recipient,
-        uint256 unlockTimestamp
+        uint256 deadline,
+        bytes32 secretHash
     );
 
-    event Released(uint256 indexed id, address indexed by, uint256 payout, address indexed recipient);
+    event Claimed(
+        uint256 indexed id,
+        address indexed recipient,
+        uint256 payout,     // số tiền thực nhận sau khi trừ phí
+        uint256 feeToOwner  // phí chuyển cho owner
+    );
+
+    event Refunded(
+        uint256 indexed id,
+        address indexed sender,
+        uint256 amount
+    );
+
     event FeeChanged(uint256 oldFeeBps, uint256 newFeeBps);
-    event OwnerWithdrawERC20(address indexed token, uint256 amount);
+
     event OwnerWithdrawNative(uint256 amount);
 
     constructor(uint256 _feeBps) {
@@ -134,30 +150,42 @@ contract SimpleEscrowAutoRelease is SimpleOwnable, SimpleReentrancyGuard {
         nextId = 1;
     }
 
+    /**
+     * @notice Nạp tiền vào escrow.
+     * @param token địa chỉ ERC20 stablecoin (ví dụ cUSD)
+     * @param amountExpected số lượng dự định chuyểnFrom
+     * @param recipient người nhận
+     * @param deadline hạn cuối claim (>= block.timestamp + 60)
+     * @param secretHash hash bí mật: khuyến nghị = keccak256(abi.encodePacked(secret, recipient))
+     * @return id mã thanh toán
+     */
     function deposit(
         address token,
         uint256 amountExpected,
         address recipient,
-        uint256 unlockTimestamp
-    ) external returns (uint256) {
+        uint256 deadline,
+        bytes32 secretHash
+    ) external returns (uint256 id) {
         require(token != address(0), "token zero");
         require(amountExpected > 0, "amount>0");
         require(recipient != address(0), "recipient zero");
-        require(unlockTimestamp >= block.timestamp + 60, "unlockTimestamp too soon");
+        require(secretHash != bytes32(0), "secretHash zero");
+        require(deadline >= block.timestamp + 60, "deadline too soon");
 
-        // balance before
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        // số dư trước
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
 
-        // transferFrom (safe)
+        // chuyển token vào escrow (an toàn)
         SafeERC20.safeTransferFrom(token, msg.sender, address(this), amountExpected);
 
-        // balance after
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
-        require(balanceAfter >= balanceBefore, "balance after < before");
-        uint256 received = balanceAfter - balanceBefore;
+        // số dư sau
+        uint256 balAfter = IERC20(token).balanceOf(address(this));
+        require(balAfter >= balBefore, "balance after < before");
+
+        uint256 received = balAfter - balBefore;
         require(received > 0, "received zero");
 
-        uint256 id = nextId;
+        id = nextId;
         payments[id] = Payment({
             sender: msg.sender,
             token: token,
@@ -165,56 +193,76 @@ contract SimpleEscrowAutoRelease is SimpleOwnable, SimpleReentrancyGuard {
             amountReceived: received,
             recipient: recipient,
             createdAt: block.timestamp,
-            unlockTimestamp: unlockTimestamp,
-            released: false
+            deadline: deadline,
+            secretHash: secretHash,
+            claimed: false,
+            refunded: false
         });
 
         nextId = id + 1;
 
-        emit Deposited(id, msg.sender, token, amountExpected, received, recipient, unlockTimestamp);
-        return id;
+        emit Deposited(id, msg.sender, token, amountExpected, received, recipient, deadline, secretHash);
     }
 
-    function release(uint256 id) external nonReentrant {
+    /**
+     * @notice Người nhận rút tiền bằng secret trước deadline.
+     * @param id mã thanh toán
+     * @param secret bytes bất kỳ; hợp lệ khi keccak256(abi.encodePacked(secret, recipient)) == secretHash
+     */
+    function claim(uint256 id, string calldata secret) external nonReentrant {
         Payment storage p = payments[id];
         require(p.amountReceived > 0, "not found or zero");
-        require(!p.released, "already released");
+        require(!p.claimed, "already claimed");
+        require(!p.refunded, "already refunded");
+        require(block.timestamp <= p.deadline, "past deadline");
+        require(msg.sender == p.recipient, "not recipient");
 
-        bool isAuthorized = (msg.sender == p.sender || msg.sender == p.recipient || msg.sender == owner());
-        require(isAuthorized || block.timestamp >= p.unlockTimestamp, "not authorized");
+        // hash bí mật theo chuỗi string
+        bytes32 h = keccak256(abi.encodePacked(bytes(secret), p.recipient));
+        require(h == p.secretHash, "invalid secret");
 
-        // effects
-        p.released = true;
+        p.claimed = true;
 
-        uint256 fee = 0;
-        if (feeBps > 0) {
-            require(p.amountReceived == 0 || p.amountReceived <= type(uint256).max / feeBps, "fee calc overflow");
-            fee = (p.amountReceived * feeBps) / 10000;
-        }
+        uint256 fee = (p.amountReceived * feeBps) / 10000;
         uint256 payout = p.amountReceived - fee;
 
-        // interactions
         SafeERC20.safeTransfer(p.token, p.recipient, payout);
-        if (fee > 0) {
-            SafeERC20.safeTransfer(p.token, owner(), fee);
-        }
+        if (fee > 0) SafeERC20.safeTransfer(p.token, owner(), fee);
 
-        emit Released(id, msg.sender, payout, p.recipient);
+        emit Claimed(id, p.recipient, payout, fee);
     }
 
-    // owner functions
+
+
+    /**
+     * @notice Quá hạn, người gửi được refund.
+     * @param id mã thanh toán
+     */
+    function refund(uint256 id) external nonReentrant {
+        Payment storage p = payments[id];
+        require(p.amountReceived > 0, "not found or zero");
+        require(!p.claimed, "already claimed");
+        require(!p.refunded, "already refunded");
+        require(block.timestamp > p.deadline, "not expired");
+        require(msg.sender == p.sender, "not sender");
+
+        p.refunded = true;
+
+        // Hoàn lại toàn bộ amountReceived cho người gửi
+        SafeERC20.safeTransfer(p.token, p.sender, p.amountReceived);
+
+        emit Refunded(id, p.sender, p.amountReceived);
+    }
+
+    // ============ Owner functions ============
+
     function setFeeBps(uint256 newFeeBps) external onlyOwner {
         require(newFeeBps <= 10000, "feeBps<=10000");
         emit FeeChanged(feeBps, newFeeBps);
         feeBps = newFeeBps;
     }
 
-    function ownerWithdrawERC20(address token, uint256 amount) external onlyOwner {
-        require(token != address(0), "token zero");
-        SafeERC20.safeTransfer(token, owner(), amount);
-        emit OwnerWithdrawERC20(token, amount);
-    }
-
+    // Chỉ rút native (nếu ai đó gửi nhầm)
     function withdrawNative(uint256 amount) external onlyOwner {
         require(address(this).balance >= amount, "insufficient native");
         payable(owner()).transfer(amount);
@@ -224,6 +272,7 @@ contract SimpleEscrowAutoRelease is SimpleOwnable, SimpleReentrancyGuard {
     receive() external payable {}
     fallback() external payable {}
 
+    // Helper
     function getPayment(uint256 id) external view returns (Payment memory) {
         return payments[id];
     }
