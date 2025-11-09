@@ -1,0 +1,183 @@
+
+Celo Remittance DApp - Remix Deployment & Test Guide (TXT)
+=========================================================
+
+This document provides step-by-step setup instructions, usage guide, prerequisites, deployment guide (using Remix), and a testing guide with a concrete test case using the addresses/values you provided.
+
+--------------------------------------------------------------------------------
+1) PREREQUISITES
+--------------------------------------------------------------------------------
+- Web browser: Chrome or Brave
+- MetaMask extension installed and configured for Celo Sepolia Testnet
+- Access to Remix IDE: https://remix.ethereum.org
+- Some CELO test tokens in your MetaMask account for gas (obtain from Celo faucet)
+- Basic familiarity with Ethereum-style wallets and transactions
+
+Celo Sepolia Testnet RPC (add to MetaMask if not present):
+- Network name: Celo Sepolia Testnet
+- RPC URL: https://rpc.sepolia.celo-testnet.org
+- Chain ID: 11142220
+- Currency symbol: CELO
+- Block Explorer: https://celo-sepolia.blockscout.com/
+
+--------------------------------------------------------------------------------
+2) SETUP INSTRUCTIONS (Remix web)
+--------------------------------------------------------------------------------
+1. Open Remix: https://remix.ethereum.org
+2. Create two new files in Remix -> File Explorer:
+   - RemittanceEscrowSecret.sol   (paste your escrow contract code)
+   - MockToken.sol                (paste MockToken ERC20 code if you need a test token)
+3. Compile both contracts:
+   - Compiler version: 0.8.21 (or compatible 0.8.x)
+   - Click "Compile" for each contract, ensure there are no errors.
+4. Switch to "Deploy & Run Transactions" panel:
+   - Environment: Injected Provider - MetaMask
+   - Connect Remix to MetaMask (approve connection prompt)
+   - Ensure MetaMask is on Celo Sepolia Testnet and has test CELO for gas.
+
+--------------------------------------------------------------------------------
+3) DEPLOYMENT GUIDE (Remix)
+--------------------------------------------------------------------------------
+A) Deploy MockToken (test token)
+1. Select MockToken contract in Remix.
+2. In the constructor input, paste initialSupply e.g.:
+   - 10000000000000000000000  // 10,000 tokens (18 decimals)
+3. Click "Deploy", confirm transaction in MetaMask.
+4. After mined, copy MockToken contract address (example from your session):
+   - MockToken address: 0xFeF6919AB4dbA8397681Ece63A5798f9994F0a6C
+
+B) Deploy RemittanceEscrowSecret (escrow contract)
+1. Select RemittanceEscrowSecret in Remix.
+2. In the constructor argument, set feeBps (example):
+   - 50   // 0.5% fee
+3. Click "Deploy", confirm in MetaMask.
+4. After mined, copy deployed address (example from your session):
+   - RemittanceEscrowSecret address: 0xf1e94aCaECd68956045cEc0C80a37E3EAFe0fd80
+5. Optionally verify contract on Sourcify or Blockscout via Remix "Sourcify verification".
+
+--------------------------------------------------------------------------------
+4) USAGE GUIDE (example calls on Remix)
+--------------------------------------------------------------------------------
+Important accounts used in examples below (from your session):
+- Sender (depositor) address: 0xfAD4Da6779aDd9459b7743Cf73e2F17Ae583c631
+- Recipient address:           0xc7e0acac2ea47b9237eff4f6b86108518e4962d4
+- MockToken (ERC20) address:   0xFeF6919AB4dbA8397681Ece63A5798f9994F0a6C
+- Escrow contract address:     0xf1e94aCaECd68956045cEc0C80a37E3EAFe0fd80
+- Secret (plaintext):          "mypass123"
+- SecretHash (used in deposit):0x1c3cdfffaba9dcb4ff792350addc135b94a62834a30a68c190128bffe18ba6c3
+- Amount:                      1000000000000000000   // 1 token (18 decimals)
+- Deadline (example):          1762709500
+
+Steps (Remix UI):
+
+1) Approve token allowance (from Sender account)
+   - Open MockToken contract in Deployed Contracts panel.
+   - Call: approve(spender, value)
+     * spender = 0xf1e94aCaECd68956045cEc0C80a37E3EAFe0fd80
+     * value   = 1000000000000000000
+   - Confirm in MetaMask. On success, allowance is set.
+
+2) Deposit funds into escrow (Sender account)
+   - Open RemittanceEscrowSecret contract in Deployed Contracts panel.
+   - Call deposit(token, amountExpected, recipient, deadline, secretHash)
+     * token         = 0xFeF6919AB4dbA8397681Ece63A5798f9994F0a6C
+     * amountExpected= 1000000000000000000
+     * recipient     = 0xc7e0acac2ea47b9237eff4f6b86108518e4962d4
+     * deadline      = 1762709500
+     * secretHash    = 0x1c3cdfffaba9dcb4ff792350addc135b94a62834a30a68c190128bffe18ba6c3
+   - Confirm transaction in MetaMask. After mining, an event "Deposited" should appear and getPayment(1) will show the stored Payment struct with amountReceived = 1000000000000000000.
+
+3) Claim funds (Recipient account)
+   - Switch MetaMask to Recipient address: 0xc7e0acac2ea47b9237eff4f6b86108518e4962d4
+   - On RemittanceEscrowSecret, call: claim(id, secret)
+     * id     = 1
+     * secret = mypass123   (no quotes in the Remix input field)
+   - Confirm transaction. On success, tokens are transferred to recipient minus fee (if fee set). Event "Claimed" emitted.
+
+4) Refund (Sender account, after deadline)
+   - Switch MetaMask to Sender address (if needed).
+   - If the deadline has passed and recipient has not claimed, call: refund(1)
+   - Confirm transaction. Tokens returned to sender.
+
+--------------------------------------------------------------------------------
+5) TESTING GUIDE (step-by-step test case using your parameters)
+--------------------------------------------------------------------------------
+This testing guide uses the exact parameters you provided so you can reproduce the flow on Celo Sepolia Testnet using Remix.
+
+Test case summary:
+- Deploy MockToken (address: 0xFeF6919A...)
+- Deploy RemittanceEscrowSecret (address: 0xf1e94aC...)
+- Sender = 0xfAD4Da67...
+- Recipient = 0xc7e0acac...
+- Secret = "mypass123"
+- SecretHash = 0x1c3cdfffaba9dcb4ff792350addc135b94a62834a30a68c190128bffe18ba6c3
+- AmountExpected = 1 MUSD (1000000000000000000)
+- Deadline = 1762709500
+
+Detailed steps and expected results:
+
+A) Pre-checks
+   1. Ensure sender has some MockToken balance (the deployer of MockToken receives initialSupply).
+   2. Ensure sender has CELO in MetaMask to pay gas on Celo Sepolia.
+
+B) Approve
+   - Action: Sender calls MockToken.approve(escrowAddress, 1e18)
+   - Expected: Transaction success; allowance is set. No tokens moved yet.
+
+C) Deposit
+   - Action: Sender calls RemittanceEscrowSecret.deposit(MockTokenAddress, 1e18, RecipientAddress, Deadline, SecretHash)
+   - Expected:
+       * Transaction succeeds.
+       * Event "Deposited" emits with id = 1, amountReceived = 1e18, recipient = 0xc7e0...
+       * getPayment(1) returns Payment struct with amountReceived = 1000000000000000000 and claimed=false/refunded=false.
+
+D) Attempt wrong-actor claim (negative test)
+   - Action: Sender (wrong actor) tries to call claim(1, "mypass123")
+   - Expected: Transaction reverted with message "not recipient". Confirm protection works.
+
+E) Claim (positive)
+   - Action: Switch to Recipient account and call claim(1, "mypass123")
+   - Expected:
+       * Transaction succeeds.
+       * Event "Claimed" with payout = amountReceived - fee, fee = computed feeBps portion (if feeBps=50, fee = 0.5% of 1e18 = 5e15)
+       * Recipient's MockToken balance increases by payout.
+       * getPayment(1) shows claimed = true.
+
+F) Refund (negative scenario after claim)
+   - Action: Sender calls refund(1) after claim
+   - Expected: Transaction reverts (already claimed)
+
+G) Refund after expiry (if claim not performed)
+   - Action: If deadline passes and claimed=false, sender calls refund(1)
+   - Expected: Transaction succeeds; MockToken returned to sender and getPayment(1) shows refunded=true.
+
+--------------------------------------------------------------------------------
+6) TROUBLESHOOTING
+--------------------------------------------------------------------------------
+- "token not contract" revert: You passed an EOA address to token field. Use the MockToken contract address (0xFeF6...). Verify extcodesize > 0.
+- "missing revert data" / CALL_EXCEPTION: Usually you sent the transaction to wrong address (e.g., sent deposit call directly to recipient EOA). Ensure "to" in Remix is the escrow contract address.
+- "not recipient": You attempted claim() from non-recipient account. Switch MetaMask to recipient.
+- "not found or zero": getPayment(id) returned zero -> deposit didn't store data (maybe used wrong contract or deposit reverted). Check events and use correct deployed escrow address.
+- "invalid secret": Secret string doesn't match stored secretHash. Make sure secretHash was computed correctly using keccak256(abi.encodePacked(bytes(secret), recipient)).
+
+--------------------------------------------------------------------------------
+7) FILE REFERENCES (Useful commands for Remix Console)
+--------------------------------------------------------------------------------
+- Compute secretHash in Remix console:
+  const recipient = "0xc7e0acac2ea47b9237eff4f6b86108518e4962d4";
+  const secret = "mypass123";
+  const secretHash = web3.utils.soliditySha3({type:"bytes", value:web3.utils.utf8ToHex(secret)}, {type:"address", value:recipient});
+  console.log(secretHash);
+
+- Get current timestamp in Remix console:
+  Math.floor(Date.now()/1000)
+
+--------------------------------------------------------------------------------
+8) CONTACT & NOTES
+--------------------------------------------------------------------------------
+Author: <Your Name>
+License: MIT
+Network used in this guide: Celo Sepolia Testnet (11142220)
+
+--------------------------------------------------------------------------------
+
