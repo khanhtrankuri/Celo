@@ -77,3 +77,8 @@ Here is a diagram that describes how the **Remittance dApp** works between the s
 
 ---
 
+Celo Sepolia Testnet : 0xfad4da6779add9459b7743cf73e2f17ae583c631
+
+
+
+
