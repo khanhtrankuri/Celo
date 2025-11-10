@@ -1,26 +1,26 @@
 # 💸 Remittance dApp
 
-**Remittance dApp** là một ứng dụng phi tập trung (dApp) cho phép **người dùng chuyển tiền xuyên biên giới bằng stablecoin** (ví dụ: **cUSD** trên mạng **Celo**) một cách **nhanh chóng, an toàn và chi phí thấp**, **không cần trung gian ngân hàng**.
+**Remittance dApp** is a decentralized application (dApp) that allows **users to transfer money across borders using stablecoins** (e.g. **cUSD** on the **Celo** network) **quickly, securely, and at low cost**, **without the need for a bank intermediary**.
 
-Dự án hướng đến **mục tiêu tài chính toàn diện (financial inclusion)** — giúp người dùng ở bất kỳ đâu có thể **gửi và nhận tiền chỉ với điện thoại di động và ví điện tử** (MetaMask hoặc Celo Wallet).
-
----
-
-## 🚀 Tính năng nổi bật
-
-| 🔹 | Tính năng | Mô tả |
-|----|-----------|-------|
-| 🔒 | **Escrow Smart Contract** | Giữ tiền tạm thời trong hợp đồng, chỉ giải phóng khi người nhận nhập đúng **mã bí mật (secret)** hoặc khi **hết thời hạn (deadline)**. |
-| 💸 | **Chuyển tiền xuyên biên giới** | Dựa trên **stablecoin (cUSD, USDC)** – tốc độ cao, phí thấp, minh bạch và không phụ thuộc vào ngân hàng. |
-| 🧾 | **Refund (Hoàn tiền)** | Người gửi có thể hoàn lại tiền nếu người nhận không rút trong thời gian quy định. |
-| 🛡️ | **Bảo mật cao** | Hợp đồng hỗ trợ **SafeERC20**, cơ chế **chống Reentrancy Attack**. |
-| ⚙️ | **Phí linh hoạt** | Chủ sở hữu hợp đồng có thể tùy chỉnh **tỷ lệ phí (feeBps ≤ 10000)** khi người nhận rút tiền. |
+The project aims for **financial inclusion** — enabling users anywhere to **send and receive money with just their mobile phone and a digital wallet** (MetaMask or Celo Wallet).
 
 ---
 
-## 🧠 Kiến trúc hệ thống
+## 🚀 Highlights
 
-Dưới đây là sơ đồ mô tả cách **Remittance dApp** hoạt động giữa người gửi, hợp đồng thông minh và người nhận:
+| 🔹 | Features | Description |
+|----|----------|-------|
+| 🔒 | **Escrow Smart Contract** | Hold funds temporarily in the contract, only release when the recipient enters the correct **secret code** or when the **deadline**. |
+| 💸 | **Cross-border money transfer** | Based on **stablecoins (cUSD, USDC)** – high speed, low fees, transparent and bank-independent. |
+| 🧾 | **Refund** | The sender can refund the money if the recipient does not withdraw within the specified time. |
+| 🛡️ | **High security** | The contract supports **SafeERC20**, **anti-Reentrancy Attack** mechanism. |
+| ⚙️ | **Flexible fees** | The contract owner can customize the **fee rate (feeBps ≤ 10000)** when the recipient withdraws. |
+
+---
+
+## 🧠 System Architecture
+
+Here is a diagram that describes how the **Remittance dApp** works between the sender, smart contract, and receiver:
 
                  ┌────────────────────────────┐
                  │      💸 Remittance dApp    │
@@ -41,37 +41,39 @@ Dưới đây là sơ đồ mô tả cách **Remittance dApp** hoạt động gi
      refund()│                                 │claim()
              │                                 ▼
     ┌─────────────────┐              ┌─────────────────┐
-    │ 👤 Người gửi    │             │ 👤 Người nhận   │
-    │ (Sender)        │              │ (Recipient)     │
+    │ 👤 Sender       │             │ 👤 Recipient    │
+    │                 │              │                 │
     └─────────────────┘              └─────────────────┘
              │
              │ deposit()
              ▼
       ┌────────────────────────────┐
       │ 💼 Escrow (Token Vault)    │
-      │ - Lưu trữ token an toàn    │
-      │ - Chỉ giải phóng khi hợp lệ│
+      │ - Secure token storage     │
+      │ - Release only when valid  │
       └────────────────────────────┘
 
 
-**Luồng hoạt động:**
+**Workflow:**
 
-1. **Người gửi (Sender)** tạo `secret` và tính `secretHash = keccak256(abi.encodePacked(secret, recipient))`.
-2. **Gửi tiền (deposit)**: Người gửi gọi `deposit()` với token, người nhận, thời hạn và `secretHash`.
-3. **Người nhận (Recipient)** gọi `claim(secret)` với đúng secret → nhận tiền.
-4. **Nếu quá hạn (deadline)**, người gửi có thể gọi `refund()` để nhận lại tiền.
-5. Khi `claim()` thành công, hệ thống tự động trừ **phí feeBps** cho owner.
+1. **Sender** creates `secret` and calculates `secretHash = keccak256(abi.encodePacked(secret, recipient))`.
+
+2. **Deposit**: Sender calls `deposit()` with token, recipient, deadline and `secretHash`.
+3. **Recipient** calls `claim(secret)` with correct secret → receive money.
+4. **If the deadline is overdue**, the sender can call `refund()` to get the money back.
+5. When `claim()` is successful, the system automatically deducts **feeBps** for the owner.
 
 ---
 
-## ⚙️ Các hàm chính
+## ⚙️ Main functions
 
-| Hàm | Vai trò | Ghi chú |
+| Function | Role | Note |
 |-----|---------|---------|
-| `deposit(token, amount, recipient, deadline, secretHash)` | Người gửi nạp tiền vào escrow | Hỗ trợ token ERC20 (cUSD, USDC, USDT...) |
-| `claim(id, secret)` | Người nhận rút tiền bằng mã bí mật | Kiểm tra hash: `keccak256(abi.encodePacked(secret, recipient))` |
-| `refund(id)` | Người gửi hoàn lại tiền sau hạn | Chỉ thực hiện được sau khi `deadline` qua |
-| `setFeeBps(newFee)` | Chủ hợp đồng thay đổi tỷ lệ phí | `feeBps ≤ 10000` |
-| `transferOwnership(newOwner)` | Chuyển quyền quản trị hợp đồng | Chỉ `owner` được phép gọi |
+| `deposit(token, amount, recipient, deadline, secretHash)` | Sender deposits funds into escrow | Supports ERC20 tokens (cUSD, USDC, USDT...) |
+| `claim(id, secret)` | Recipient withdraws funds using secret code | Check hash: `keccak256(abi.encodePacked(secret, recipient))` |
+| `refund(id)` | Sender refunds after deadline | Only possible after `deadline` passed |
+| `setFeeBps(newFee)` | Contract owner changes fee rate | `feeBps ≤ 10000` |
+| `transferOwnership(newOwner)` | Transfers contract administration rights | Only `owner` is allowed to call |
 
 ---
+
